@@ -1,12 +1,11 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { reviewPR, FileInfo, ReviewResult, InlineComment, extractVerdict } from "./reviewer";
+import { reviewPR, FileInfo, ReviewResult, InlineComment } from "./reviewer";
 
 function shouldExclude(filename: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
     if (pattern.startsWith("*.")) {
-      const ext = pattern.slice(1);
-      if (filename.endsWith(ext)) return true;
+      if (filename.endsWith(pattern.slice(1))) return true;
     } else if (pattern.endsWith("/**")) {
       const dir = pattern.slice(0, -3);
       if (filename.startsWith(dir + "/") || filename === dir) return true;
@@ -15,8 +14,7 @@ function shouldExclude(filename: string, patterns: string[]): boolean {
       const rest = filename.slice(dir.length + 1);
       if (filename.startsWith(dir + "/") && !rest.includes("/")) return true;
     } else {
-      if (filename === pattern || filename.endsWith("/" + pattern))
-        return true;
+      if (filename === pattern || filename.endsWith("/" + pattern)) return true;
     }
   }
   return false;
@@ -26,17 +24,13 @@ async function resolvePRNumber(
   octokit: ReturnType<typeof github.getOctokit>,
   context: typeof github.context
 ): Promise<number | null> {
-  if (
-    context.eventName === "pull_request" ||
-    context.eventName === "pull_request_target"
-  ) {
+  if (context.eventName === "pull_request" || context.eventName === "pull_request_target") {
     return context.payload.pull_request?.number ?? null;
   }
 
   if (context.eventName === "issue_comment") {
     const isPR = !!context.payload.issue?.pull_request;
     const body = (context.payload.comment?.body ?? "").toLowerCase().trim();
-
     if (isPR && body.includes("/review")) {
       return context.payload.issue?.number ?? null;
     }
@@ -92,111 +86,31 @@ async function fetchProjectStructure(
       recursive: "1",
     });
 
-    if (!data.tree || data.tree.length === 0) return "";
+    if (!data.tree?.length) return "";
 
-    const skipPatterns = [
-      "node_modules/",
-      ".git/",
-      "dist/",
-      "build/",
-      ".next/",
-      "__pycache__/",
-      ".venv/",
-      "vendor/",
-      "coverage/",
-      ".cache/",
-    ];
-
-    const skipExtensions = [
-      ".lock",
-      ".map",
-      ".min.js",
-      ".min.css",
-      ".svg",
-      ".png",
-      ".jpg",
-      ".jpeg",
-      ".gif",
-      ".ico",
-      ".woff",
-      ".woff2",
-      ".ttf",
-      ".eot",
-    ];
+    const skip = ["node_modules/", ".git/", "dist/", "build/", ".next/", "__pycache__/", ".venv/", "vendor/", "coverage/"];
+    const skipExt = [".lock", ".map", ".min.js", ".min.css", ".svg", ".png", ".jpg", ".gif", ".ico", ".woff", ".woff2"];
 
     const entries = data.tree
       .filter((item) => {
-        const path = item.path || "";
-        if (skipPatterns.some((p) => path.startsWith(p) || path.includes("/" + p)))
-          return false;
-        if (item.type === "blob" && skipExtensions.some((ext) => path.endsWith(ext)))
-          return false;
+        const p = item.path || "";
+        if (skip.some((s) => p.startsWith(s) || p.includes("/" + s))) return false;
+        if (item.type === "blob" && skipExt.some((e) => p.endsWith(e))) return false;
         return true;
       })
-      .map((item) => {
-        const prefix = item.type === "tree" ? "📁 " : "   ";
-        return `${prefix}${item.path}`;
-      });
-
-    if (entries.length > 200) {
-      return entries.slice(0, 200).join("\n") + "\n... (truncated)";
-    }
+      .slice(0, 150)
+      .map((item) => (item.type === "tree" ? `📁 ${item.path}` : `   ${item.path}`));
 
     return entries.join("\n");
-  } catch (error) {
-    core.debug(`Could not fetch project structure: ${error}`);
+  } catch {
     return "";
   }
-}
-
-function buildCheckAnnotations(
-  inlineComments: InlineComment[],
-  fallbackFile: string
-): Array<{
-  path: string;
-  start_line: number;
-  end_line: number;
-  annotation_level: "notice" | "warning" | "failure";
-  message: string;
-  title: string;
-}> {
-  if (inlineComments.length === 0) {
-    return [
-      {
-        path: fallbackFile,
-        start_line: 1,
-        end_line: 1,
-        annotation_level: "notice",
-        message: "AI code review completed. See PR comment for details.",
-        title: "Review Complete",
-      },
-    ];
-  }
-
-  return inlineComments.slice(0, 50).map((c) => {
-    let level: "notice" | "warning" | "failure" = "notice";
-    if (c.body.startsWith("🚨")) level = "failure";
-    else if (c.body.startsWith("⚠️")) level = "warning";
-
-    return {
-      path: c.path,
-      start_line: c.line,
-      end_line: c.line,
-      annotation_level: level,
-      message: c.body.replace(/^[🚨⚠️💡💬]\s*/, ""),
-      title: level === "failure"
-        ? "Critical Issue"
-        : level === "warning"
-          ? "Warning"
-          : "Suggestion",
-    };
-  });
 }
 
 async function addReaction(
   octokit: ReturnType<typeof github.getOctokit>,
   context: typeof github.context,
-  reaction: "+1" | "-1" | "laugh" | "confused" | "heart" | "hooray" | "rocket" | "eyes"
+  reaction: "eyes" | "rocket" | "hooray"
 ): Promise<void> {
   try {
     await octokit.rest.reactions.createForIssueComment({
@@ -204,9 +118,7 @@ async function addReaction(
       comment_id: context.payload.comment!.id,
       content: reaction,
     });
-  } catch {
-    core.debug(`Could not add ${reaction} reaction`);
-  }
+  } catch {}
 }
 
 async function postInlineComments(
@@ -218,7 +130,15 @@ async function postInlineComments(
 ): Promise<number> {
   if (comments.length === 0) return 0;
 
-  let posted = 0;
+  const formatted = comments.map((c) => {
+    const icon = c.severity === "critical" ? "🚨" : c.severity === "warning" ? "⚠️" : "💡";
+    return {
+      path: c.path,
+      line: c.line,
+      side: c.side as "RIGHT",
+      body: `${icon} ${c.body}`,
+    };
+  });
 
   try {
     await octokit.rest.pulls.createReview({
@@ -226,41 +146,30 @@ async function postInlineComments(
       pull_number: prNumber,
       commit_id: headSha,
       event: "COMMENT",
-      comments: comments.slice(0, 30).map((c) => ({
-        path: c.path,
-        line: c.line,
-        side: c.side,
-        body: c.body,
-      })),
+      comments: formatted,
     });
-    posted = Math.min(comments.length, 30);
-    core.info(`Posted ${posted} inline review comments via batch review`);
-  } catch (batchError) {
-    core.warning(`Batch inline comments failed, posting individually: ${batchError}`);
+    core.info(`Posted ${formatted.length} inline comments`);
+    return formatted.length;
+  } catch (err) {
+    core.warning(`Batch comments failed: ${err}`);
 
-    for (const comment of comments.slice(0, 20)) {
+    let posted = 0;
+    for (const c of formatted.slice(0, 5)) {
       try {
         await octokit.rest.pulls.createReviewComment({
           ...context.repo,
           pull_number: prNumber,
           commit_id: headSha,
-          path: comment.path,
-          line: comment.line,
-          side: comment.side,
-          body: comment.body,
+          path: c.path,
+          line: c.line,
+          side: "RIGHT",
+          body: c.body,
         });
         posted++;
-      } catch (err) {
-        core.debug(`Could not post inline comment on ${comment.path}:${comment.line}: ${err}`);
-      }
+      } catch {}
     }
-
-    if (posted > 0) {
-      core.info(`Posted ${posted} inline comments individually`);
-    }
+    return posted;
   }
-
-  return posted;
 }
 
 async function postSummaryComment(
@@ -272,13 +181,7 @@ async function postSummaryComment(
   headSha: string
 ): Promise<void> {
   if (postAsReview) {
-    const event =
-      result.verdict === "APPROVE"
-        ? "APPROVE"
-        : result.verdict === "REQUEST_CHANGES"
-          ? "REQUEST_CHANGES"
-          : "COMMENT";
-
+    const event = result.verdict === "APPROVE" ? "APPROVE" : result.verdict === "REQUEST_CHANGES" ? "REQUEST_CHANGES" : "COMMENT";
     try {
       await octokit.rest.pulls.createReview({
         ...context.repo,
@@ -287,11 +190,8 @@ async function postSummaryComment(
         body: result.body,
         event,
       });
-      core.info(`Posted formal PR review (${event}) on PR #${prNumber}`);
       return;
-    } catch (error) {
-      core.warning(`Could not post as review, falling back to comment: ${error}`);
-    }
+    } catch {}
   }
 
   await octokit.rest.issues.createComment({
@@ -299,7 +199,6 @@ async function postSummaryComment(
     issue_number: prNumber,
     body: result.body,
   });
-  core.info(`Posted review comment on PR #${prNumber}`);
 }
 
 async function createCheckRun(
@@ -309,20 +208,25 @@ async function createCheckRun(
   headSha: string,
   fallbackFile: string
 ): Promise<void> {
-  const conclusion =
-    result.verdict === "APPROVE"
-      ? "success"
-      : result.verdict === "REQUEST_CHANGES"
-        ? "failure"
-        : "neutral";
+  const conclusion = result.verdict === "APPROVE" ? "success" : result.verdict === "REQUEST_CHANGES" ? "failure" : "neutral";
 
-  const summaryMap = {
-    success: "✅ Code review passed — no blocking issues found",
-    failure: "🚨 Code review found issues that need attention",
-    neutral: "⚠️ Code review completed with suggestions",
-  };
-
-  const annotations = buildCheckAnnotations(result.inlineComments, fallbackFile);
+  const annotations = result.inlineComments.length > 0
+    ? result.inlineComments.slice(0, 50).map((c) => ({
+        path: c.path,
+        start_line: c.line,
+        end_line: c.line,
+        annotation_level: (c.severity === "critical" ? "failure" : c.severity === "warning" ? "warning" : "notice") as "failure" | "warning" | "notice",
+        message: c.body,
+        title: c.severity === "critical" ? "Critical" : c.severity === "warning" ? "Warning" : "Suggestion",
+      }))
+    : [{
+        path: fallbackFile,
+        start_line: 1,
+        end_line: 1,
+        annotation_level: "notice" as const,
+        message: "Review complete",
+        title: "AI Review",
+      }];
 
   try {
     await octokit.rest.checks.create({
@@ -333,16 +237,12 @@ async function createCheckRun(
       conclusion,
       output: {
         title: "AI Code Review",
-        summary: summaryMap[conclusion],
-        text: result.inlineComments.length > 0
-          ? `Found ${result.inlineComments.length} issue(s) across the changed files.`
-          : "No specific line-level issues found.",
+        summary: result.verdict === "APPROVE" ? "✅ No issues" : result.verdict === "REQUEST_CHANGES" ? "🚨 Issues found" : "⚠️ Suggestions",
         annotations,
       },
     });
-    core.info(`Check run created (${conclusion}) with ${annotations.length} annotation(s)`);
-  } catch (error) {
-    core.warning(`Could not create check run: ${error}`);
+  } catch (e) {
+    core.warning(`Check run failed: ${e}`);
   }
 }
 
@@ -361,17 +261,14 @@ async function run(): Promise<void> {
     const splitReview = core.getInput("split-review") !== "false";
     const splitThreshold = parseInt(core.getInput("split-threshold") || "8", 10);
 
-    const excludePatterns = excludeRaw
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    const excludePatterns = excludeRaw.split(",").map((p) => p.trim()).filter(Boolean);
 
     const octokit = github.getOctokit(token);
     const context = github.context;
 
     const prNumber = await resolvePRNumber(octokit, context);
     if (!prNumber) {
-      core.info("No applicable PR found. Skipping.");
+      core.info("No PR found");
       return;
     }
 
@@ -379,42 +276,23 @@ async function run(): Promise<void> {
       await addReaction(octokit, context, "eyes");
     }
 
-    core.info(
-      `Reviewing PR #${prNumber} in ${context.repo.owner}/${context.repo.repo}`
-    );
-    core.info(`Model: ${model} | Temperature: ${temperature} | Split: ${splitReview}`);
+    core.info(`Reviewing PR #${prNumber}`);
 
-    const { data: pr } = await octokit.rest.pulls.get({
-      ...context.repo,
-      pull_number: prNumber,
-    });
-
-    const headSha =
-      context.payload.pull_request?.head?.sha || pr.head.sha || context.sha;
+    const { data: pr } = await octokit.rest.pulls.get({ ...context.repo, pull_number: prNumber });
+    const headSha = context.payload.pull_request?.head?.sha || pr.head.sha || context.sha;
 
     const [allFiles, projectStructure] = await Promise.all([
       fetchAllFiles(octokit, context.repo, prNumber),
       fetchProjectStructure(octokit, context.repo, headSha),
     ]);
 
-    if (projectStructure) {
-      core.info(`Fetched project structure (${projectStructure.split("\n").length} entries)`);
-    }
-
-    const files = allFiles.filter(
-      (f) => !shouldExclude(f.filename, excludePatterns)
-    );
-
-    core.info(
-      `Found ${allFiles.length} changed files, ${files.length} after filtering`
-    );
+    const files = allFiles.filter((f) => !shouldExclude(f.filename, excludePatterns));
+    core.info(`${files.length} files to review`);
 
     if (files.length === 0) {
-      core.info("No reviewable files after filtering. Skipping.");
+      core.info("No files after filtering");
       return;
     }
-
-    core.info("Sending to Pollinations AI for review...");
 
     const result = await reviewPR({
       title: pr.title,
@@ -435,36 +313,22 @@ async function run(): Promise<void> {
     core.setOutput("verdict", result.verdict);
     core.setOutput("files-reviewed", String(files.length));
 
-    core.info(`Extracted ${result.inlineComments.length} inline comment(s) from review`);
+    core.info(`${result.inlineComments.length} inline comments extracted`);
 
-    const inlinePosted = await postInlineComments(
-      octokit,
-      context,
-      prNumber,
-      headSha,
-      result.inlineComments
-    );
-
+    await postInlineComments(octokit, context, prNumber, headSha, result.inlineComments);
     await postSummaryComment(octokit, context, prNumber, result, postAsReview, headSha);
 
     if (context.eventName === "issue_comment") {
-      const emoji = result.verdict === "APPROVE" ? "rocket" : "hooray";
-      await addReaction(octokit, context, emoji);
+      await addReaction(octokit, context, result.verdict === "APPROVE" ? "rocket" : "hooray");
     }
 
     if (postAsCheck) {
       await createCheckRun(octokit, context, result, headSha, allFiles[0]?.filename || "README.md");
     }
 
-    core.info(
-      `Review complete. Verdict: ${result.verdict} | Inline comments: ${inlinePosted} | Check: ${postAsCheck}`
-    );
+    core.info(`Done. Verdict: ${result.verdict}`);
   } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed(error.message);
-    } else {
-      core.setFailed("An unexpected error occurred");
-    }
+    core.setFailed(error instanceof Error ? error.message : "Unknown error");
   }
 }
 
