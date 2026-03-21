@@ -1,0 +1,48 @@
+name: "Pollinations PR Reviewer"
+description: "AI-powered code reviews for Pull Requests using Pollinations API (gen.pollinations.ai)"
+author: "yourusername"
+
+branding:
+  icon: "code"
+  color: "green"
+
+inputs:
+  pollinations-api-key:
+    description: "Your Pollinations API key (sk_ or pk_). Get one at https://enter.pollinations.ai"
+    required: true
+  github-token:
+    description: "GitHub token for posting reviews"
+    required: true
+    default: "${{ github.token }}"
+  model:
+    description: "AI model to use. See https://gen.pollinations.ai/v1/models for available models."
+    required: false
+    default: "openai"
+  max-diff-length:
+    description: "Maximum diff length in characters before truncation"
+    required: false
+    default: "30000"
+  exclude-files:
+    description: "Comma-separated glob patterns of files to exclude from review"
+    required: false
+    default: "*.lock,*.min.js,*.min.css,package-lock.json,yarn.lock,pnpm-lock.yaml,*.map,*.svg,*.png,*.jpg,*.gif,*.ico,*.woff,*.woff2,*.ttf,*.eot"
+  custom-prompt:
+    description: "Additional instructions for the AI reviewer"
+    required: false
+    default: ""
+  post-as-review:
+    description: "Post as a formal PR review instead of a regular comment (true/false)"
+    required: false
+    default: "false"
+  temperature:
+    description: "AI temperature (0.0-2.0). Lower = more focused, higher = more creative."
+    required: false
+    default: "0.3"
+
+outputs:
+  review:
+    description: "The generated review text"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
