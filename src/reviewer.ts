@@ -40,100 +40,121 @@ export interface ReviewResult {
   inlineComments: InlineComment[];
 }
 
-const SYSTEM_PROMPT = `You are a senior software engineer performing a focused code review on a GitHub Pull Request.
+const SYSTEM_PROMPT = `You are a senior software engineer performing a focused code review.
 
 CRITICAL RULES:
-1. Only comment on REAL issues — bugs, security problems, logic errors, or significant improvements
-2. DO NOT comment on style, formatting, or minor naming unless it causes confusion
-3. DO NOT repeat the same issue multiple times — mention it ONCE with all affected locations
-4. Maximum 5-7 inline code references total across the entire review
-5. If code looks fine, say so briefly and move on — do not invent problems
+1. Only comment on REAL issues — bugs, security, logic errors
+2. DO NOT comment on style, formatting, naming preferences
+3. DO NOT repeat the same issue — mention once with all locations
+4. Maximum 5-7 inline references total
+5. If code is fine, say so briefly
 
-You will receive the project directory structure for architectural context.
+The diff shows line numbers in format "L123 | code". Use these EXACT line numbers.
 
-What to look for:
-- Bugs and logic errors that will cause incorrect behavior
-- Security vulnerabilities (injection, auth bypass, data exposure)
-- Unhandled edge cases that will crash or corrupt data
-- Performance issues that will noticeably impact users
-- Missing error handling that will cause silent failures
+What to flag:
+- Bugs causing incorrect behavior
+- Security vulnerabilities
+- Unhandled edge cases causing crashes
+- Performance issues impacting users
+- Missing error handling
 
 What to IGNORE:
-- Style preferences and formatting
+- Style/formatting
 - Minor naming suggestions
-- "Consider using X instead of Y" unless there's a real benefit
-- Theoretical issues that are unlikely in practice
+- Theoretical unlikely issues
 
-INLINE REFERENCE FORMAT:
-When you find a specific issue worth commenting on, use EXACTLY this format:
->>> file.ts:42 | Your comment here explaining the issue and suggested fix
+INLINE FORMAT (use sparingly, max 5-7 total):
+>>> filename.ts:123 | Your comment explaining the issue
 
-Rules for inline references:
-- Use >>> only for issues that NEED a comment on that specific line
-- Maximum 5-7 >>> references in the entire review
-- One >>> per issue — if same issue affects multiple lines, list them in one reference
-- Do not use >>> for general observations or praise
-- The comment after | should be concise (1-2 sentences max)
+Rules:
+- Use the EXACT line number shown (L123 means line 123)
+- One >>> per issue
+- Comment must be 1-2 sentences
 
-REVIEW STRUCTURE (omit empty sections):
+STRUCTURE (skip empty sections):
 
 ### 🚨 Critical Issues
-Bugs, security vulnerabilities, data loss risks. Use >>> for specific lines.
-
-### ⚠️ Warnings  
-Edge cases, error handling gaps, risky patterns. Use >>> sparingly.
-
+### ⚠️ Warnings
 ### 💡 Suggestions
-Improvements worth considering. Use >>> only if pointing to specific code.
-
 ### ✅ Summary
-One sentence: what's good, what needs attention.
 
-VERDICT (required, pick exactly one):
-- ✅ **Verdict: Looks Good** — no blocking issues
-- ⚠️ **Verdict: Needs Attention** — minor issues to consider
-- 🚨 **Verdict: Needs Changes** — must fix before merging
+VERDICT (pick one):
+- ✅ **Verdict: Looks Good**
+- ⚠️ **Verdict: Needs Attention**
+- 🚨 **Verdict: Needs Changes**`;
 
-Be concise. Be useful. Don't waste the developer's time.`;
-
-const FILE_REVIEW_PROMPT = `You are a senior software engineer reviewing code changes.
+const FILE_REVIEW_PROMPT = `Review code changes. Line numbers shown as "L123 | code".
 
 RULES:
-- Only flag REAL issues — bugs, security, logic errors
-- Maximum 3 inline references per file chunk
-- If code is fine, respond with exactly: "No issues found."
-- Do not comment on style or formatting
+- Only flag REAL issues
+- Max 3 inline references
+- Use EXACT line numbers from diff
+- If fine, respond: "No issues found."
 
-INLINE FORMAT (use sparingly):
->>> filename.ts:42 | Brief explanation of the issue
+FORMAT: >>> filename.ts:123 | Brief issue description`;
 
-Keep it short. One issue = one >>> reference.`;
-
-function buildFileDiff(file: FileInfo): string {
-  if (!file.patch) return "";
-  return `diff --git a/${file.filename} b/${file.filename}\n${file.patch}`;
+interface NumberedDiff {
+  content: string;
+  lineMap: Map<string, Set<number>>;
 }
 
-function buildFullDiff(files: FileInfo[], maxLength: number): { diff: string; truncated: boolean } {
-  let diff = files
-    .filter((f) => f.patch)
-    .map((f) => buildFileDiff(f))
-    .join("\n\n");
+function buildNumberedDiff(files: FileInfo[], maxLength: number): { diff: string; truncated: boolean; lineMap: Map<string, Set<number>> } {
+  const lineMap = new Map<string, Set<number>>();
+  const parts: string[] = [];
 
+  for (const file of files) {
+    if (!file.patch) continue;
+
+    const validLines = new Set<number>();
+    const lines = file.patch.split("\n");
+    const numberedLines: string[] = [];
+    let currentLine = 0;
+
+    numberedLines.push(`diff --git a/${file.filename} b/${file.filename}`);
+
+    for (const line of lines) {
+      const hunkMatch = line.match(/^@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
+      if (hunkMatch) {
+        currentLine = parseInt(hunkMatch[2], 10);
+        numberedLines.push(line);
+        continue;
+      }
+
+      if (line.startsWith("+++") || line.startsWith("---")) {
+        numberedLines.push(line);
+        continue;
+      }
+
+      if (line.startsWith("+")) {
+        validLines.add(currentLine);
+        numberedLines.push(`L${currentLine.toString().padStart(4, " ")} | ${line}`);
+        currentLine++;
+      } else if (line.startsWith("-")) {
+        numberedLines.push(`      | ${line}`);
+      } else {
+        numberedLines.push(`L${currentLine.toString().padStart(4, " ")} | ${line}`);
+        currentLine++;
+      }
+    }
+
+    lineMap.set(file.filename, validLines);
+    parts.push(numberedLines.join("\n"));
+  }
+
+  let diff = parts.join("\n\n");
   let truncated = false;
+
   if (diff.length > maxLength) {
     const cutPoint = diff.lastIndexOf("\n", maxLength);
     diff = diff.substring(0, cutPoint > 0 ? cutPoint : maxLength);
     truncated = true;
   }
 
-  return { diff, truncated };
+  return { diff, truncated, lineMap };
 }
 
 function buildFileSummary(files: FileInfo[]): string {
-  return files
-    .map((f) => `- \`${f.filename}\` (${f.status}, +${f.additions}/-${f.deletions})`)
-    .join("\n");
+  return files.map((f) => `- \`${f.filename}\` (${f.status}, +${f.additions}/-${f.deletions})`).join("\n");
 }
 
 function buildSystemPrompt(customPrompt: string): string {
@@ -167,39 +188,6 @@ export function extractVerdict(review: string): Verdict {
   return "COMMENT";
 }
 
-function parseDiffLineMap(files: FileInfo[]): Map<string, Set<number>> {
-  const map = new Map<string, Set<number>>();
-
-  for (const file of files) {
-    if (!file.patch) continue;
-
-    const lines = file.patch.split("\n");
-    const validLines = new Set<number>();
-    let currentLine = 0;
-
-    for (const line of lines) {
-      const hunkMatch = line.match(/^@@\s*-\d+(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
-      if (hunkMatch) {
-        currentLine = parseInt(hunkMatch[1], 10);
-        continue;
-      }
-
-      if (line.startsWith("+") && !line.startsWith("+++")) {
-        validLines.add(currentLine);
-        currentLine++;
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        continue;
-      } else {
-        currentLine++;
-      }
-    }
-
-    map.set(file.filename, validLines);
-  }
-
-  return map;
-}
-
 function findNearestValidLine(validLines: Set<number>, target: number): number | null {
   if (validLines.size === 0) return null;
   if (validLines.has(target)) return target;
@@ -209,7 +197,7 @@ function findNearestValidLine(validLines: Set<number>, target: number): number |
 
   for (const line of validLines) {
     const dist = Math.abs(line - target);
-    if (dist < minDist && dist <= 10) {
+    if (dist < minDist && dist <= 5) {
       minDist = dist;
       closest = line;
     }
@@ -218,10 +206,9 @@ function findNearestValidLine(validLines: Set<number>, target: number): number |
   return closest > 0 ? closest : null;
 }
 
-export function extractInlineComments(review: string, files: FileInfo[]): InlineComment[] {
+export function extractInlineComments(review: string, files: FileInfo[], lineMap: Map<string, Set<number>>): InlineComment[] {
   const comments: InlineComment[] = [];
   const validFiles = new Set(files.map((f) => f.filename));
-  const diffLineMap = parseDiffLineMap(files);
 
   const refRegex = />>>\s*([^:\s]+):(\d+)\s*\|\s*(.+)/g;
   let match;
@@ -234,73 +221,47 @@ export function extractInlineComments(review: string, files: FileInfo[]): Inline
     if (!message || message.length < 5) continue;
 
     if (!validFiles.has(filename)) {
-      const found = [...validFiles].find(
-        (f) => f.endsWith("/" + filename) || f.endsWith(filename)
-      );
-      if (found) {
-        filename = found;
-      } else {
-        continue;
-      }
+      const found = [...validFiles].find((f) => f.endsWith("/" + filename) || f.endsWith(filename));
+      if (found) filename = found;
+      else continue;
     }
 
-    const validLines = diffLineMap.get(filename);
+    const validLines = lineMap.get(filename);
     if (!validLines || validLines.size === 0) continue;
 
     const validLine = findNearestValidLine(validLines, line);
     if (!validLine) continue;
 
-    const linesBefore = review.substring(Math.max(0, match.index - 300), match.index);
+    const before = review.substring(Math.max(0, match.index - 300), match.index).toLowerCase();
     let severity: "critical" | "warning" | "suggestion" = "suggestion";
-    if (linesBefore.includes("🚨") || linesBefore.toLowerCase().includes("critical")) {
-      severity = "critical";
-    } else if (linesBefore.includes("⚠️") || linesBefore.toLowerCase().includes("warning")) {
-      severity = "warning";
-    }
+    if (before.includes("🚨") || before.includes("critical")) severity = "critical";
+    else if (before.includes("⚠️") || before.includes("warning")) severity = "warning";
 
-    comments.push({
-      path: filename,
-      line: validLine,
-      side: "RIGHT",
-      body: message,
-      severity,
-    });
+    comments.push({ path: filename, line: validLine, side: "RIGHT", body: message, severity });
   }
 
   const seen = new Map<string, InlineComment>();
   for (const c of comments) {
-    const fileKey = c.path;
-    const msgNorm = c.body.toLowerCase().replace(/[^a-z0-9]/g, "").substring(0, 50);
-    const key = `${fileKey}:${msgNorm}`;
-
-    const existing = seen.get(key);
-    if (!existing || c.severity === "critical") {
-      seen.set(key, c);
-    }
+    const key = `${c.path}:${c.body.toLowerCase().replace(/[^a-z0-9]/g, "").substring(0, 50)}`;
+    if (!seen.has(key) || c.severity === "critical") seen.set(key, c);
   }
 
-  const deduplicated = [...seen.values()];
-
-  const sorted = deduplicated.sort((a, b) => {
-    const severityOrder = { critical: 0, warning: 1, suggestion: 2 };
-    return severityOrder[a.severity] - severityOrder[b.severity];
-  });
-
-  return sorted.slice(0, 10);
+  return [...seen.values()]
+    .sort((a, b) => {
+      const order = { critical: 0, warning: 1, suggestion: 2 };
+      return order[a.severity] - order[b.severity];
+    })
+    .slice(0, 10);
 }
 
 function cleanReviewBody(review: string): string {
-  let cleaned = review.replace(/>>>\s*[^:\s]+:\d+\s*\|\s*.+/g, "").trim();
-  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
-  return cleaned;
+  return review.replace(/>>>\s*[^:\s]+:\d+\s*\|\s*.+/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function formatHeader(modelDisplay: string, filesCount: number, truncated: boolean): string {
-  let header = `## 🤖 AI Code Review\n\n`;
-  header += `> Reviewed **${filesCount}** file${filesCount !== 1 ? "s" : ""}`;
-  if (truncated) header += ` (diff truncated)`;
-  header += `\n\n`;
-  return header;
+  let h = `## 🤖 AI Code Review\n\n> Reviewed **${filesCount}** file${filesCount !== 1 ? "s" : ""}`;
+  if (truncated) h += " (truncated)";
+  return h + "\n\n";
 }
 
 function formatFooter(modelDisplay: string): string {
@@ -308,9 +269,8 @@ function formatFooter(modelDisplay: string): string {
 }
 
 async function reviewSinglePass(input: ReviewInput, modelDisplay: string): Promise<ReviewResult> {
-  const { diff, truncated } = buildFullDiff(input.files, input.maxDiffLength);
+  const { diff, truncated, lineMap } = buildNumberedDiff(input.files, input.maxDiffLength);
   const fileSummary = buildFileSummary(input.files);
-  const systemPrompt = buildSystemPrompt(input.customPrompt);
   const structureBlock = buildProjectStructureBlock(input.projectStructure);
 
   const userMessage = `Review this Pull Request.
@@ -323,65 +283,44 @@ ${input.body || "_No description._"}
 ${structureBlock}**Files (${input.files.length}):**
 ${fileSummary}
 
-**Diff:**
+**Diff (line numbers shown as L### |):**
 \`\`\`diff
 ${diff}
 \`\`\`${truncated ? "\n\n⚠️ Diff truncated." : ""}`;
 
-  const options: PollinationsOptions = {
-    apiKey: input.apiKey,
-    model: input.model,
-    temperature: input.temperature,
-  };
-
   const review = await chatWithRetry(
     [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: buildSystemPrompt(input.customPrompt) },
       { role: "user", content: userMessage },
     ],
-    options,
+    { apiKey: input.apiKey, model: input.model, temperature: input.temperature },
     input.maxRetries
   );
 
-  const verdict = extractVerdict(review);
-  const inlineComments = extractInlineComments(review, input.files);
-  const cleanedReview = cleanReviewBody(review);
-  const header = formatHeader(modelDisplay, input.files.length, truncated);
-  const footer = formatFooter(modelDisplay);
-
   return {
-    body: header + cleanedReview + footer,
-    verdict,
-    inlineComments,
+    body: formatHeader(modelDisplay, input.files.length, truncated) + cleanReviewBody(review) + formatFooter(modelDisplay),
+    verdict: extractVerdict(review),
+    inlineComments: extractInlineComments(review, input.files, lineMap),
   };
 }
 
 function chunkFiles(files: FileInfo[], maxChunkSize: number): FileInfo[][] {
   const chunks: FileInfo[][] = [];
-  let currentChunk: FileInfo[] = [];
-  let currentSize = 0;
+  let chunk: FileInfo[] = [];
+  let size = 0;
 
-  const sorted = [...files].sort(
-    (a, b) => (b.additions + b.deletions) - (a.additions + a.deletions)
-  );
-
-  for (const file of sorted) {
-    const patchLen = file.patch?.length ?? 0;
-
-    if (currentChunk.length > 0 && currentSize + patchLen > maxChunkSize) {
-      chunks.push(currentChunk);
-      currentChunk = [];
-      currentSize = 0;
+  for (const file of [...files].sort((a, b) => (b.additions + b.deletions) - (a.additions + a.deletions))) {
+    const len = file.patch?.length ?? 0;
+    if (chunk.length > 0 && size + len > maxChunkSize) {
+      chunks.push(chunk);
+      chunk = [];
+      size = 0;
     }
-
-    currentChunk.push(file);
-    currentSize += patchLen;
+    chunk.push(file);
+    size += len;
   }
 
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk);
-  }
-
+  if (chunk.length > 0) chunks.push(chunk);
   return chunks;
 }
 
@@ -390,24 +329,21 @@ async function reviewSplit(input: ReviewInput, modelDisplay: string): Promise<Re
   const chunks = chunkFiles(input.files, perFileLimit);
   const structureBlock = buildProjectStructureBlock(input.projectStructure);
 
-  core.info(`Split review: ${chunks.length} chunk(s)`);
+  core.info(`Split: ${chunks.length} chunks`);
 
-  const options: PollinationsOptions = {
-    apiKey: input.apiKey,
-    model: input.model,
-    temperature: input.temperature,
-  };
-
-  const chunkResults: string[] = [];
-  let allInlineComments: InlineComment[] = [];
+  const opts = { apiKey: input.apiKey, model: input.model, temperature: input.temperature };
+  const results: string[] = [];
+  let allComments: InlineComment[] = [];
+  let allLineMaps = new Map<string, Set<number>>();
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    core.info(`Chunk ${i + 1}/${chunks.length}: ${chunk.map((f) => f.filename).join(", ")}`);
+    core.info(`Chunk ${i + 1}/${chunks.length}`);
 
-    const { diff } = buildFullDiff(chunk, perFileLimit);
+    const { diff, lineMap } = buildNumberedDiff(chunk, perFileLimit);
+    for (const [k, v] of lineMap) allLineMaps.set(k, v);
 
-    const userMessage = `Review these files from PR "${input.title}":
+    const msg = `Review files from PR "${input.title}":
 
 ${structureBlock}${chunk.map((f) => `- \`${f.filename}\``).join("\n")}
 
@@ -415,85 +351,51 @@ ${structureBlock}${chunk.map((f) => `- \`${f.filename}\``).join("\n")}
 ${diff}
 \`\`\``;
 
-    const result = await chatWithRetry(
-      [
-        { role: "system", content: FILE_REVIEW_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      options,
+    const res = await chatWithRetry(
+      [{ role: "system", content: FILE_REVIEW_PROMPT }, { role: "user", content: msg }],
+      opts,
       input.maxRetries
     );
 
-    const isClean = result.toLowerCase().includes("no issues found") && result.length < 50;
-
-    if (!isClean) {
-      chunkResults.push(result);
-      allInlineComments = allInlineComments.concat(extractInlineComments(result, chunk));
+    if (!(res.toLowerCase().includes("no issues found") && res.length < 50)) {
+      results.push(res);
+      allComments = allComments.concat(extractInlineComments(res, chunk, lineMap));
     }
   }
 
-  if (chunkResults.length === 0) {
-    const header = formatHeader(modelDisplay, input.files.length, false);
-    const footer = formatFooter(modelDisplay);
+  if (results.length === 0) {
     return {
-      body: header + "### ✅ Summary\nCode looks good. No issues found.\n\n✅ **Verdict: Looks Good**" + footer,
+      body: formatHeader(modelDisplay, input.files.length, false) + "### ✅ Summary\nNo issues found.\n\n✅ **Verdict: Looks Good**" + formatFooter(modelDisplay),
       verdict: "APPROVE",
       inlineComments: [],
     };
   }
 
-  const mergePrompt = `Synthesize these findings into one review for PR "${input.title}":
-
-${chunkResults.join("\n\n---\n\n")}
-
-Rules:
-- Deduplicate similar issues
-- Keep only the most important findings
-- Maximum 5 >>> inline references total
-- Use the standard review structure
-
-Verdict required at the end.`;
-
   const merged = await chatWithRetry(
     [
       { role: "system", content: buildSystemPrompt(input.customPrompt) },
-      { role: "user", content: mergePrompt },
+      { role: "user", content: `Synthesize findings for PR "${input.title}":\n\n${results.join("\n\n---\n\n")}\n\nDeduplicate. Max 5 >>> refs. Verdict required.` },
     ],
-    options,
+    opts,
     input.maxRetries
   );
 
-  const mergedInlineComments = extractInlineComments(merged, input.files);
-  const finalComments = mergedInlineComments.length > 0 ? mergedInlineComments : allInlineComments;
-
-  const verdict = extractVerdict(merged);
-  const cleanedReview = cleanReviewBody(merged);
-  const header = formatHeader(modelDisplay, input.files.length, false);
-  const footer = formatFooter(modelDisplay);
+  const mergedComments = extractInlineComments(merged, input.files, allLineMaps);
 
   return {
-    body: header + cleanedReview + footer,
-    verdict,
-    inlineComments: finalComments.slice(0, 10),
+    body: formatHeader(modelDisplay, input.files.length, false) + cleanReviewBody(merged) + formatFooter(modelDisplay),
+    verdict: extractVerdict(merged),
+    inlineComments: (mergedComments.length > 0 ? mergedComments : allComments).slice(0, 10),
   };
 }
 
 export async function fetchModelDisplayName(model: string): Promise<string> {
   try {
-    const response = await fetch("https://gen.pollinations.ai/text/models", {
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!response.ok) return model;
-
-    const models = (await response.json()) as Array<{ name: string; description?: string }>;
+    const res = await fetch("https://gen.pollinations.ai/text/models", { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return model;
+    const models = (await res.json()) as Array<{ name: string; description?: string }>;
     const found = models.find((m) => m.name.toLowerCase() === model.toLowerCase());
-
-    if (found?.description) {
-      return found.description.split(" - ")[0].trim();
-    }
-
-    return model;
+    return found?.description?.split(" - ")[0]?.trim() || model;
   } catch {
     return model;
   }
@@ -503,10 +405,8 @@ export async function reviewPR(input: ReviewInput): Promise<ReviewResult> {
   const modelDisplay = await fetchModelDisplayName(input.model);
   core.info(`Model: ${modelDisplay}`);
 
-  const shouldSplit = input.splitReview && input.files.length > input.splitThreshold;
-
-  if (shouldSplit) {
-    core.info(`Using split review (${input.files.length} files > ${input.splitThreshold})`);
+  if (input.splitReview && input.files.length > input.splitThreshold) {
+    core.info(`Split review: ${input.files.length} files`);
     return reviewSplit(input, modelDisplay);
   }
 
