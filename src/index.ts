@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { reviewPR, FileInfo, ReviewResult, extractVerdict } from "./reviewer";
+import { reviewPR, FileInfo, ReviewResult, InlineComment, extractVerdict } from "./reviewer";
 
 function shouldExclude(filename: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
@@ -80,64 +80,116 @@ async function fetchAllFiles(
   return files;
 }
 
-interface Annotation {
-  file: string;
-  line: number;
-  level: "notice" | "warning" | "failure";
-  message: string;
+async function fetchProjectStructure(
+  octokit: ReturnType<typeof github.getOctokit>,
+  repo: { owner: string; repo: string },
+  ref: string
+): Promise<string> {
+  try {
+    const { data } = await octokit.rest.git.getTree({
+      ...repo,
+      tree_sha: ref,
+      recursive: "1",
+    });
+
+    if (!data.tree || data.tree.length === 0) return "";
+
+    const skipPatterns = [
+      "node_modules/",
+      ".git/",
+      "dist/",
+      "build/",
+      ".next/",
+      "__pycache__/",
+      ".venv/",
+      "vendor/",
+      "coverage/",
+      ".cache/",
+    ];
+
+    const skipExtensions = [
+      ".lock",
+      ".map",
+      ".min.js",
+      ".min.css",
+      ".svg",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".ico",
+      ".woff",
+      ".woff2",
+      ".ttf",
+      ".eot",
+    ];
+
+    const entries = data.tree
+      .filter((item) => {
+        const path = item.path || "";
+        if (skipPatterns.some((p) => path.startsWith(p) || path.includes("/" + p)))
+          return false;
+        if (item.type === "blob" && skipExtensions.some((ext) => path.endsWith(ext)))
+          return false;
+        return true;
+      })
+      .map((item) => {
+        const prefix = item.type === "tree" ? "📁 " : "   ";
+        return `${prefix}${item.path}`;
+      });
+
+    if (entries.length > 200) {
+      return entries.slice(0, 200).join("\n") + "\n... (truncated)";
+    }
+
+    return entries.join("\n");
+  } catch (error) {
+    core.debug(`Could not fetch project structure: ${error}`);
+    return "";
+  }
 }
 
-function extractAnnotations(review: string, files: FileInfo[]): Annotation[] {
-  const annotations: Annotation[] = [];
-  const validFiles = new Set(files.map((f) => f.filename));
-
-  const sectionPatterns: Array<{
-    regex: RegExp;
-    level: "failure" | "warning" | "notice";
-  }> = [
-    { regex: /###\s*🚨\s*Critical Issues\n([\s\S]*?)(?=\n###|\n---|\n✅\s*\*\*|$)/i, level: "failure" },
-    { regex: /###\s*⚠️\s*Warnings\n([\s\S]*?)(?=\n###|\n---|\n✅\s*\*\*|$)/i, level: "warning" },
-    { regex: /###\s*💡\s*Suggestions\n([\s\S]*?)(?=\n###|\n---|\n✅\s*\*\*|$)/i, level: "notice" },
-  ];
-
-  for (const { regex, level } of sectionPatterns) {
-    const match = review.match(regex);
-    if (!match) continue;
-
-    const content = match[1];
-    const fileRefs = content.matchAll(/`([^`]+?)`/g);
-
-    for (const ref of fileRefs) {
-      const candidate = ref[1].trim();
-      if (validFiles.has(candidate)) {
-        const lineMatch = content.match(
-          new RegExp(`\`${candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\`[^\\n]*(?:line\\s*(\\d+))`, "i")
-        );
-
-        const surroundingText = content
-          .split("\n")
-          .find((l) => l.includes(candidate));
-
-        annotations.push({
-          file: candidate,
-          line: lineMatch?.[1] ? parseInt(lineMatch[1], 10) : 1,
-          level,
-          message:
-            surroundingText
-              ?.replace(/`[^`]*`/g, "")
-              .replace(/^[-*•]\s*/, "")
-              .trim() || `${level === "failure" ? "Critical issue" : level === "warning" ? "Warning" : "Suggestion"} found`,
-        });
-      }
-    }
+function buildCheckAnnotations(
+  inlineComments: InlineComment[],
+  fallbackFile: string
+): Array<{
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: "notice" | "warning" | "failure";
+  message: string;
+  title: string;
+}> {
+  if (inlineComments.length === 0) {
+    return [
+      {
+        path: fallbackFile,
+        start_line: 1,
+        end_line: 1,
+        annotation_level: "notice",
+        message: "AI code review completed. See PR comment for details.",
+        title: "Review Complete",
+      },
+    ];
   }
 
-  const seen = new Set<string>();
-  return annotations.filter((a) => {
-    const key = `${a.file}:${a.line}:${a.message}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  return inlineComments.slice(0, 50).map((c) => {
+    let level: "notice" | "warning" | "failure" = "notice";
+    if (c.body.startsWith("🚨")) level = "failure";
+    else if (c.body.startsWith("⚠️")) level = "warning";
+
+    return {
+      path: c.path,
+      start_line: c.line,
+      end_line: c.line,
+      annotation_level: level,
+      message: c.body.replace(/^[🚨⚠️💡💬]\s*/, ""),
+      title: level === "failure"
+        ? "Critical Issue"
+        : level === "warning"
+          ? "Warning"
+          : "Suggestion",
+    };
   });
 }
 
@@ -157,7 +209,61 @@ async function addReaction(
   }
 }
 
-async function postReview(
+async function postInlineComments(
+  octokit: ReturnType<typeof github.getOctokit>,
+  context: typeof github.context,
+  prNumber: number,
+  headSha: string,
+  comments: InlineComment[]
+): Promise<number> {
+  if (comments.length === 0) return 0;
+
+  let posted = 0;
+
+  try {
+    await octokit.rest.pulls.createReview({
+      ...context.repo,
+      pull_number: prNumber,
+      commit_id: headSha,
+      event: "COMMENT",
+      comments: comments.slice(0, 30).map((c) => ({
+        path: c.path,
+        line: c.line,
+        side: c.side,
+        body: c.body,
+      })),
+    });
+    posted = Math.min(comments.length, 30);
+    core.info(`Posted ${posted} inline review comments via batch review`);
+  } catch (batchError) {
+    core.warning(`Batch inline comments failed, posting individually: ${batchError}`);
+
+    for (const comment of comments.slice(0, 20)) {
+      try {
+        await octokit.rest.pulls.createReviewComment({
+          ...context.repo,
+          pull_number: prNumber,
+          commit_id: headSha,
+          path: comment.path,
+          line: comment.line,
+          side: comment.side,
+          body: comment.body,
+        });
+        posted++;
+      } catch (err) {
+        core.debug(`Could not post inline comment on ${comment.path}:${comment.line}: ${err}`);
+      }
+    }
+
+    if (posted > 0) {
+      core.info(`Posted ${posted} inline comments individually`);
+    }
+  }
+
+  return posted;
+}
+
+async function postSummaryComment(
   octokit: ReturnType<typeof github.getOctokit>,
   context: typeof github.context,
   prNumber: number,
@@ -200,7 +306,6 @@ async function createCheckRun(
   octokit: ReturnType<typeof github.getOctokit>,
   context: typeof github.context,
   result: ReviewResult,
-  annotations: Annotation[],
   headSha: string,
   fallbackFile: string
 ): Promise<void> {
@@ -217,26 +322,7 @@ async function createCheckRun(
     neutral: "⚠️ Code review completed with suggestions",
   };
 
-  const checkAnnotations =
-    annotations.length > 0
-      ? annotations.slice(0, 50).map((a) => ({
-          path: a.file,
-          start_line: a.line,
-          end_line: a.line,
-          annotation_level: a.level as "notice" | "warning" | "failure",
-          message: a.message,
-          title: "AI Review Finding",
-        }))
-      : [
-          {
-            path: fallbackFile,
-            start_line: 1,
-            end_line: 1,
-            annotation_level: "notice" as const,
-            message: "AI code review completed. See PR comment for details.",
-            title: "Review Complete",
-          },
-        ];
+  const annotations = buildCheckAnnotations(result.inlineComments, fallbackFile);
 
   try {
     await octokit.rest.checks.create({
@@ -248,10 +334,13 @@ async function createCheckRun(
       output: {
         title: "AI Code Review",
         summary: summaryMap[conclusion],
-        annotations: checkAnnotations,
+        text: result.inlineComments.length > 0
+          ? `Found ${result.inlineComments.length} issue(s) across the changed files.`
+          : "No specific line-level issues found.",
+        annotations,
       },
     });
-    core.info(`Check run created (${conclusion})`);
+    core.info(`Check run created (${conclusion}) with ${annotations.length} annotation(s)`);
   } catch (error) {
     core.warning(`Could not create check run: ${error}`);
   }
@@ -300,7 +389,17 @@ async function run(): Promise<void> {
       pull_number: prNumber,
     });
 
-    const allFiles = await fetchAllFiles(octokit, context.repo, prNumber);
+    const headSha =
+      context.payload.pull_request?.head?.sha || pr.head.sha || context.sha;
+
+    const [allFiles, projectStructure] = await Promise.all([
+      fetchAllFiles(octokit, context.repo, prNumber),
+      fetchProjectStructure(octokit, context.repo, headSha),
+    ]);
+
+    if (projectStructure) {
+      core.info(`Fetched project structure (${projectStructure.split("\n").length} entries)`);
+    }
 
     const files = allFiles.filter(
       (f) => !shouldExclude(f.filename, excludePatterns)
@@ -329,16 +428,24 @@ async function run(): Promise<void> {
       maxRetries,
       splitReview,
       splitThreshold,
+      projectStructure,
     });
 
     core.setOutput("review", result.body);
     core.setOutput("verdict", result.verdict);
     core.setOutput("files-reviewed", String(files.length));
 
-    const headSha =
-      context.payload.pull_request?.head?.sha || pr.head.sha || context.sha;
+    core.info(`Extracted ${result.inlineComments.length} inline comment(s) from review`);
 
-    await postReview(octokit, context, prNumber, result, postAsReview, headSha);
+    const inlinePosted = await postInlineComments(
+      octokit,
+      context,
+      prNumber,
+      headSha,
+      result.inlineComments
+    );
+
+    await postSummaryComment(octokit, context, prNumber, result, postAsReview, headSha);
 
     if (context.eventName === "issue_comment") {
       const emoji = result.verdict === "APPROVE" ? "rocket" : "hooray";
@@ -346,18 +453,12 @@ async function run(): Promise<void> {
     }
 
     if (postAsCheck) {
-      const annotations = extractAnnotations(result.body, files);
-      await createCheckRun(
-        octokit,
-        context,
-        result,
-        annotations,
-        headSha,
-        allFiles[0]?.filename || "README.md"
-      );
+      await createCheckRun(octokit, context, result, headSha, allFiles[0]?.filename || "README.md");
     }
 
-    core.info(`Review complete. Verdict: ${result.verdict}`);
+    core.info(
+      `Review complete. Verdict: ${result.verdict} | Inline comments: ${inlinePosted} | Check: ${postAsCheck}`
+    );
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(error.message);
