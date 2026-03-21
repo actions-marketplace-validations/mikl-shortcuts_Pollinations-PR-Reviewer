@@ -75,9 +75,9 @@ STRUCTURE:
 Only include sections that have actual findings. Skip empty sections entirely.
 Do not write a section header if you have nothing for it.
 
-- 🚨 Critical Issues — only if there are bugs, security issues, crashes
-- ⚠️ Warnings — only if there are real concerns
-- 💡 Suggestions — only if there are meaningful improvements
+- 🚨 Critical Issues — only if there are bugs, security issues, crashes (delete, if not needed)
+- ⚠️ Warnings — only if there are real concerns (delete, if not needed)
+- 💡 Suggestions — only if there are meaningful improvements (delete, if not needed)
 - ✅ Summary — always include, 1-2 sentences max
 
 Example of good review when code is clean:
@@ -282,7 +282,16 @@ export function extractInlineComments(review: string, files: FileInfo[], lineMap
 }
 
 function cleanReviewBody(review: string): string {
-  return review.replace(/>>>\s*[^:\s]+:\d+\s*\|\s*.+/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  let cleaned = review
+    .replace(/>>>\s*([^:\s]+):(\d+)\s*\|\s*(.+)/g, "- `$1:$2` — $3")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  cleaned = cleaned
+    .replace(/###\s*[^\n]+\n\s*(?=###|\n*$|✅\s*\*\*|⚠️\s*\*\*|🚨\s*\*\*)/g, "")
+    .trim();
+
+  return cleaned;
 }
 
 function formatHeader(modelDisplay: string, filesCount: number, truncated: boolean): string {
