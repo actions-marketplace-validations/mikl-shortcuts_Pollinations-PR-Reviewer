@@ -46,6 +46,75 @@ async function getPRNumber(): Promise<number | null> {
   return null;
 }
 
+interface Annotation {
+  file: string;
+  line: number;
+  level: "notice" | "warning" | "error";
+  message: string;
+}
+
+function extractAnnotations(review: string): Annotation[] {
+  const annotations: Annotation[] = [];
+
+  const criticalMatch = review.match(/###\s*🚨\s*Critical Issues\n([\s\S]*?)(?=###|\Z)/);
+  if (criticalMatch) {
+    const lines = criticalMatch[1].split("\n");
+    for (const line of lines) {
+      if (line.includes("`") && line.trim()) {
+        const match = line.match(/`([^`]+)`/);
+        if (match) {
+          annotations.push({
+            file: match[1],
+            line: 1,
+            level: "error",
+            message: line.replace(/`[^`]+`/g, "").trim() || "Critical issue found",
+          });
+        }
+      }
+    }
+  }
+
+  const warningsMatch = review.match(/###\s*⚠️\s*Warnings\n([\s\S]*?)(?=###|\Z)/);
+  if (warningsMatch) {
+    const lines = warningsMatch[1].split("\n");
+    for (const line of lines) {
+      if (line.includes("`") && line.trim()) {
+        const match = line.match(/`([^`]+)`/);
+        if (match) {
+          annotations.push({
+            file: match[1],
+            line: 1,
+            level: "warning",
+            message: line.replace(/`[^`]+`/g, "").trim() || "Warning found",
+          });
+        }
+      }
+    }
+  }
+
+  return annotations;
+}
+
+function extractVerdict(review: string): "APPROVE" | "REQUEST_CHANGES" | "NEUTRAL" {
+  const lowerReview = review.toLowerCase();
+
+  if (
+    lowerReview.includes("verdict: looks good") ||
+    lowerReview.includes("✅") && lowerReview.includes("looks good")
+  ) {
+    return "APPROVE";
+  }
+
+  if (
+    lowerReview.includes("verdict: needs changes") ||
+    lowerReview.includes("🚨") && lowerReview.includes("needs changes")
+  ) {
+    return "REQUEST_CHANGES";
+  }
+
+  return "NEUTRAL";
+}
+
 async function run(): Promise<void> {
   try {
     const apiKey = core.getInput("pollinations-api-key", { required: true });
@@ -57,14 +126,7 @@ async function run(): Promise<void> {
     );
     const excludeRaw = core.getInput("exclude-files") || "";
     const customPrompt = core.getInput("custom-prompt") || "";
-    const postAsReview = core.getInput("post-as-review") === "true";
-    const temperature = parseFloat(core.getInput("temperature") || "0.3");
-
-    if (!apiKey.startsWith("sk_") && !apiKey.startsWith("pk_")) {
-      core.warning(
-        "API key does not start with sk_ or pk_. Make sure you're using a valid Pollinations API key from https://enter.pollinations.ai"
-      );
-    }
+    const postAsCheck = core.getInput("post-as-check") !== "false";
 
     const excludePatterns = excludeRaw
       .split(",")
@@ -151,26 +213,75 @@ async function run(): Promise<void> {
       model,
       maxDiffLength,
       customPrompt,
-      temperature,
+      temperature: 0.3,
     });
 
     core.setOutput("review", review);
 
-    if (postAsReview) {
-      await octokit.rest.pulls.createReview({
-        ...context.repo,
-        pull_number: prNumber,
-        body: review,
-        event: "COMMENT",
-      });
-      core.info(`Review posted as PR review on #${prNumber}`);
-    } else {
-      await octokit.rest.issues.createComment({
-        ...context.repo,
-        issue_number: prNumber,
-        body: review,
-      });
-      core.info(`Review posted as comment on #${prNumber}`);
+    const verdict = extractVerdict(review);
+    core.setOutput("verdict", verdict);
+
+    await octokit.rest.issues.createComment({
+      ...context.repo,
+      issue_number: prNumber,
+      body: review,
+    });
+
+    core.info(`Review posted as comment on PR #${prNumber}`);
+
+    if (postAsCheck) {
+      const annotations = extractAnnotations(review);
+
+      const checkBody: any = {
+        name: "AI Code Review",
+        head_sha: context.payload.pull_request?.head.sha || context.sha,
+        status: "completed",
+        conclusion:
+          verdict === "APPROVE"
+            ? "success"
+            : verdict === "REQUEST_CHANGES"
+              ? "failure"
+              : "neutral",
+        output: {
+          title: "AI Code Review",
+          summary:
+            verdict === "APPROVE"
+              ? "✅ Review passed - no blockers found"
+              : verdict === "REQUEST_CHANGES"
+                ? "🚨 Review found issues that need attention"
+                : "⚠️ Review completed with suggestions",
+          annotations:
+            annotations.length > 0
+              ? annotations.slice(0, 50).map((a) => ({
+                  path: a.file,
+                  start_line: a.line,
+                  end_line: a.line,
+                  annotation_level: a.level,
+                  message: a.message,
+                  title: "AI Review Finding",
+                }))
+              : [
+                  {
+                    path: allFiles[0]?.filename || "README.md",
+                    start_line: 1,
+                    end_line: 1,
+                    annotation_level: "notice",
+                    message: "AI review completed",
+                    title: "Review Info",
+                  },
+                ],
+        },
+      };
+
+      try {
+        await octokit.rest.checks.create({
+          ...context.repo,
+          ...checkBody,
+        });
+        core.info("Check run created successfully");
+      } catch (error) {
+        core.warning(`Could not create check run: ${error}`);
+      }
     }
   } catch (error) {
     if (error instanceof Error) {

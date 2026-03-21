@@ -47,7 +47,7 @@ Potential problems, unhandled edge cases, risky patterns.
 Better approaches, cleaner patterns, performance improvements.
 
 ### 📝 Nitpicks
-Minor style or naming issues. Keep this very short.
+Minor style or naming issues. Keep this short.
 
 ### ✅ What Looks Good
 Briefly note well-written code.
@@ -57,7 +57,7 @@ End with one of:
 - ⚠️ **Verdict: Needs Attention** — minor issues to address
 - 🚨 **Verdict: Needs Changes** — blocking issues found
 
-Be honest. If the code is fine, say so briefly. Don't invent problems.`;
+Be honest. If the code is fine, say so. Don't invent problems.`;
 
 export async function reviewPR(input: ReviewInput): Promise<string> {
   const fileSummary = input.files
@@ -100,7 +100,7 @@ ${diff}
 
   if (truncated) {
     userMessage +=
-      "\n\n⚠️ The diff was truncated due to size. Focus on reviewing what is shown above.";
+      "\n\n⚠️ The diff was truncated due to size. Focus on reviewing what's shown above.";
   }
 
   const options: PollinationsOptions = {
@@ -117,8 +117,8 @@ ${diff}
     options
   );
 
-  const header = "## 🤖 AI Code Review\n\n";
-  const footer = `\n\n---\n<sub>Powered by [Pollinations AI](https://pollinations.ai) • Model: \`${input.model}\` • [Add to your repo](https://github.com/yourusername/pollinations-pr-reviewer)</sub>`;
+  const header = `## 🤖 AI Code Review\n\n`;
+  const footer = `\n\n---\n<sub>Powered by [Pollinations AI](https://pollinations.ai) • Model: \`${input.model}\`</sub>`;
 
   return header + review + footer;
 }

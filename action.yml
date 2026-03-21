@@ -1,48 +1,46 @@
 name: "Pollinations PR Reviewer"
-description: "AI-powered code reviews for Pull Requests using Pollinations API (gen.pollinations.ai)"
-author: "yourusername"
+description: "AI-powered code reviews for Pull Requests using Pollinations API"
+author: "mikl-shortcuts"
 
 branding:
-  icon: "code"
-  color: "green"
+  icon: "eye"
+  color: "purple"
 
 inputs:
   pollinations-api-key:
-    description: "Your Pollinations API key (sk_ or pk_). Get one at https://enter.pollinations.ai"
+    description: "Your Pollinations API key from https://enter.pollinations.ai"
     required: true
   github-token:
-    description: "GitHub token for posting reviews"
+    description: "GitHub token"
     required: true
     default: "${{ github.token }}"
   model:
-    description: "AI model to use. See https://gen.pollinations.ai/v1/models for available models."
+    description: "AI model (openai, mistral, llama, etc.)"
     required: false
     default: "openai"
   max-diff-length:
-    description: "Maximum diff length in characters before truncation"
+    description: "Max diff characters"
     required: false
     default: "30000"
   exclude-files:
-    description: "Comma-separated glob patterns of files to exclude from review"
+    description: "Comma-separated patterns to exclude"
     required: false
-    default: "*.lock,*.min.js,*.min.css,package-lock.json,yarn.lock,pnpm-lock.yaml,*.map,*.svg,*.png,*.jpg,*.gif,*.ico,*.woff,*.woff2,*.ttf,*.eot"
+    default: "*.lock,*.min.js,*.min.css,package-lock.json,yarn.lock,pnpm-lock.yaml,*.map,*.svg,*.png,*.jpg,*.gif,*.ico"
   custom-prompt:
-    description: "Additional instructions for the AI reviewer"
+    description: "Additional instructions for reviewer"
     required: false
     default: ""
-  post-as-review:
-    description: "Post as a formal PR review instead of a regular comment (true/false)"
+  post-as-check:
+    description: "Post review as a GitHub check run"
     required: false
-    default: "false"
-  temperature:
-    description: "AI temperature (0.0-2.0). Lower = more focused, higher = more creative."
-    required: false
-    default: "0.3"
+    default: "true"
 
 outputs:
   review:
-    description: "The generated review text"
+    description: "Generated review text"
+  verdict:
+    description: "Review verdict (APPROVE, REQUEST_CHANGES, or NEUTRAL)"
 
 runs:
   using: "node20"
-  main: "dist/index.js"
+  main: "index.js"
