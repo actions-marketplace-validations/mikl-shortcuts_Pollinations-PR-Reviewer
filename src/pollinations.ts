@@ -70,18 +70,18 @@ export async function chat(
     throw new Error(`Pollinations API error ${response.status}: ${text}`);
   }
 
-  const data: ChatCompletionResponse = await response.json();
+  const data = (await response.json()) as any;
 
   if (!data.choices || data.choices.length === 0) {
     throw new Error("Pollinations API returned no choices");
   }
 
   const content = data.choices[0].message.content;
-  if (!content || content.trim().length === 0) {
+  if (!content || content.toString().trim().length === 0) {
     throw new Error("Pollinations API returned empty content");
   }
 
-  return content.trim();
+  return content.toString().trim();
 }
 
 export async function chatWithRetry(
