@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: yourusername/pollinations-pr-reviewer@v1
+        uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -133,7 +133,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: yourusername/pollinations-pr-reviewer@v1
+      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +142,7 @@ jobs:
 ### With Custom Instructions
 
 ```yaml
-- uses: yourusername/pollinations-pr-reviewer@v1
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -163,7 +163,7 @@ jobs:
 ### Only Review Source Code
 
 ```yaml
-- uses: yourusername/pollinations-pr-reviewer@v1
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -186,7 +186,7 @@ jobs:
     if: contains(github.event.comment.body, '/review')
     runs-on: ubuntu-latest
     steps:
-      - uses: yourusername/pollinations-pr-reviewer@v1
+      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -195,7 +195,7 @@ jobs:
 ### Post as Formal PR Review
 
 ```yaml
-- uses: yourusername/pollinations-pr-reviewer@v1
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -207,7 +207,7 @@ jobs:
 ```yaml
 steps:
   - id: ai-review
-    uses: yourusername/pollinations-pr-reviewer@v1
+    uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
     with:
       pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -239,7 +239,7 @@ Go to [enter.pollinations.ai](https://enter.pollinations.ai), sign in, and creat
 Each review consumes Pollen from your balance. Cost depends on the model and diff size. Check your balance at `gen.pollinations.ai/account/balance`.
 
 **What models can I use?**
-Any model listed at [gen.pollinations.ai/v1/models](https://gen.pollinations.ai/v1/models). Common options: `openai`, `mistral`, `llama`.
+Any model listed at [gen.pollinations.ai/v1/models](https://gen.pollinations.ai/v1/models). Common options: `openai`, `mistral`.
 
 **Is my code sent to a third party?**
 The PR diff is sent to Pollinations AI (`gen.pollinations.ai`) for analysis. Don't use this on repos with code you can't share externally.
@@ -262,13 +262,11 @@ Yes. GitHub Actions has a free tier for private repos. Just be aware the diff is
 ## Development
 
 ```bash
-git clone https://github.com/yourusername/pollinations-pr-reviewer.git
+git clone https://github.com/mikl-shortcuts/Pollinations-PR-Reviewer.git
 cd pollinations-pr-reviewer
 npm install
 npm run build
 ```
-
-The `dist/` folder must be committed (GitHub Actions requirement).
 
 ```bash
 git add -A
