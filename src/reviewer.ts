@@ -47,7 +47,7 @@ CRITICAL RULES:
 2. DO NOT comment on style, formatting, naming preferences
 3. DO NOT repeat the same issue — mention once with all locations
 4. Maximum 5-7 inline references total
-5. If code is fine, say so briefly
+5. If code is fine, just write a brief summary and verdict
 
 The diff shows line numbers in format "L123 | code". Use these EXACT line numbers.
 
@@ -71,27 +71,54 @@ Rules:
 - One >>> per issue
 - Comment must be 1-2 sentences
 
-STRUCTURE (skip empty sections):
+STRUCTURE:
+Only include sections that have actual findings. Skip empty sections entirely.
+Do not write a section header if you have nothing for it.
 
-### 🚨 Critical Issues
-### ⚠️ Warnings
-### 💡 Suggestions
+- 🚨 Critical Issues — only if there are bugs, security issues, crashes
+- ⚠️ Warnings — only if there are real concerns
+- 💡 Suggestions — only if there are meaningful improvements
+- ✅ Summary — always include, 1-2 sentences max
+
+Example of good review when code is clean:
+"""
 ### ✅ Summary
+Clean implementation. Error handling is solid, no security concerns.
 
-VERDICT (pick one):
+✅ **Verdict: Looks Good**
+"""
+
+Example when there are issues:
+"""
+### 🚨 Critical Issues
+>>> auth.ts:45 | Missing null check will crash when user is undefined
+
+### ✅ Summary
+One critical bug found in auth flow.
+
+🚨 **Verdict: Needs Changes**
+"""
+
+VERDICT (required, pick one):
 - ✅ **Verdict: Looks Good**
 - ⚠️ **Verdict: Needs Attention**
-- 🚨 **Verdict: Needs Changes**`;
+- 🚨 **Verdict: Needs Changes**
+
+Be concise. No fluff. No empty sections.`;
 
 const FILE_REVIEW_PROMPT = `Review code changes. Line numbers shown as "L123 | code".
 
 RULES:
-- Only flag REAL issues
-- Max 3 inline references
+- Only flag REAL issues — bugs, security, logic errors
+- Max 3 inline references per chunk
 - Use EXACT line numbers from diff
-- If fine, respond: "No issues found."
+- If code is clean, respond with exactly: "No issues found."
+- Do NOT write section headers if nothing to report
 
-FORMAT: >>> filename.ts:123 | Brief issue description`;
+FORMAT for issues:
+>>> filename.ts:123 | Brief description
+
+Keep response minimal. No empty sections. No fluff.`;
 
 interface NumberedDiff {
   content: string;
