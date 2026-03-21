@@ -2,7 +2,7 @@
 
 AI-powered code reviews for your GitHub Pull Requests using [Pollinations AI](https://pollinations.ai).
 
-No servers to deploy. Just add a workflow file and your API key.
+No servers to deploy. No infrastructure. Just a workflow file and an API key.
 
 ## Quick Start
 
@@ -34,6 +34,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 
 jobs:
   review:
@@ -58,16 +59,28 @@ Commit, push, open a PR. Done.
 ```
 You open a PR
       ↓
-GitHub runs this Action (on GitHub's servers)
+GitHub triggers this Action
       ↓
 Action reads the PR diff via GitHub API
       ↓
-Diff is sent to gen.pollinations.ai with your API key
+Diff is sent to Pollinations AI for analysis
       ↓
-AI review is posted as a comment on your PR
+Review is posted as a comment + check run on your PR
 ```
 
-No servers. No infrastructure. Just a workflow file and an API key.
+---
+
+## Features
+
+- **Automatic reviews** on PR open and new commits
+- **On-demand reviews** via `/review` comment
+- **Split review mode** for large PRs — reviews file-by-file, then synthesizes
+- **GitHub Check Runs** with inline annotations
+- **Formal PR reviews** with approve/request changes
+- **Smart file filtering** to skip generated files
+- **Retry with backoff** for transient API errors
+- **Request timeout** protection (120s per API call)
+- **Verdict extraction** (APPROVE / REQUEST_CHANGES / COMMENT)
 
 ---
 
@@ -84,7 +97,7 @@ No servers. No infrastructure. Just a workflow file and an API key.
 ## Configuration
 
 ```yaml
-- uses: yourusername/pollinations-pr-reviewer@v1
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -93,7 +106,11 @@ No servers. No infrastructure. Just a workflow file and an API key.
     exclude-files: "*.lock,*.min.js,docs/**"
     custom-prompt: "This is a React + TypeScript project."
     post-as-review: "false"
+    post-as-check: "true"
     temperature: "0.3"
+    max-retries: "3"
+    split-review: "true"
+    split-threshold: "8"
 ```
 
 ### Inputs
@@ -102,18 +119,24 @@ No servers. No infrastructure. Just a workflow file and an API key.
 |-------|-------------|----------|---------|
 | `pollinations-api-key` | Pollinations API key (`sk_` or `pk_`) | ✅ | — |
 | `github-token` | GitHub token | ✅ | `${{ github.token }}` |
-| `model` | AI model ([see available](https://gen.pollinations.ai/v1/models)) | ❌ | `openai` |
+| `model` | AI model | ❌ | `openai` |
 | `max-diff-length` | Max diff chars before truncation | ❌ | `30000` |
 | `exclude-files` | Comma-separated file patterns to skip | ❌ | `*.lock,*.min.js,...` |
 | `custom-prompt` | Extra instructions for the AI | ❌ | — |
-| `post-as-review` | Post as PR review vs comment | ❌ | `false` |
+| `post-as-review` | Post as formal PR review | ❌ | `false` |
+| `post-as-check` | Create a GitHub check run | ❌ | `true` |
 | `temperature` | AI temperature (0.0–2.0) | ❌ | `0.3` |
+| `max-retries` | Max retry attempts for API calls | ❌ | `3` |
+| `split-review` | Review large PRs file-by-file | ❌ | `true` |
+| `split-threshold` | File count threshold for split mode | ❌ | `8` |
 
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
-| `review` | The generated review text |
+| `review` | The full generated review text |
+| `verdict` | Review verdict: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` |
+| `files-reviewed` | Number of files reviewed |
 
 ---
 
@@ -129,6 +152,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: write
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -157,7 +181,6 @@ jobs:
       - Server vs client component boundaries
       - SQL injection via raw queries
       - Missing error boundaries
-      - Proper use of React Server Components
 ```
 
 ### Only Review Source Code
@@ -170,7 +193,7 @@ jobs:
     exclude-files: "*.lock,*.json,*.md,*.txt,*.yml,*.yaml,docs/**,*.svg,*.png,*.jpg"
 ```
 
-### On-Demand Only (No Auto-Review)
+### On-Demand Only
 
 ```yaml
 name: AI PR Review
@@ -181,6 +204,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 jobs:
   review:
     if: contains(github.event.comment.body, '/review')
@@ -202,7 +226,7 @@ jobs:
     post-as-review: "true"
 ```
 
-### Use Review Output in Next Steps
+### Gate Merging on AI Review
 
 ```yaml
 steps:
@@ -211,10 +235,11 @@ steps:
     with:
       pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  - name: Print review length
-    run: echo "Review length: ${#REVIEW}"
-    env:
-      REVIEW: ${{ steps.ai-review.outputs.review }}
+  - name: Block on critical issues
+    if: steps.ai-review.outputs.verdict == 'REQUEST_CHANGES'
+    run: |
+      echo "AI review found blocking issues"
+      exit 1
 ```
 
 ---
@@ -223,39 +248,39 @@ steps:
 
 | Type | Prefix | Use Case | Rate Limit |
 |------|--------|----------|------------|
-| Secret | `sk_` | Server-side (recommended for Actions) | None |
+| Secret | `sk_` | Server-side (recommended) | None |
 | Publishable | `pk_` | Client-side apps | 1 pollen/IP/hour |
 
-**Recommendation:** Use a `sk_` (secret) key stored as a GitHub secret. Never commit API keys to your repo.
+Use a `sk_` key stored as a GitHub secret. Never commit API keys.
 
 ---
 
 ## FAQ
 
 **Where do I get an API key?**
-Go to [enter.pollinations.ai](https://enter.pollinations.ai), sign in, and create a key.
+[enter.pollinations.ai](https://enter.pollinations.ai) — sign in and create a key.
 
 **How much does it cost?**
-Each review consumes Pollen from your balance. Cost depends on the model and diff size. Check your balance at `gen.pollinations.ai/account/balance`.
+Each review consumes Pollen. Cost depends on model and diff size. Check balance at `gen.pollinations.ai/account/balance`.
 
 **What models can I use?**
-Any model listed at [gen.pollinations.ai/v1/models](https://gen.pollinations.ai/v1/models). Common options: `openai`, `mistral`.
+Any model at [gen.pollinations.ai/v1/models](https://gen.pollinations.ai/v1/models).
 
 **Is my code sent to a third party?**
-The PR diff is sent to Pollinations AI (`gen.pollinations.ai`) for analysis. Don't use this on repos with code you can't share externally.
+The PR diff is sent to Pollinations AI for analysis. Don't use this on repos with confidential code.
 
 **What about large PRs?**
-Diffs exceeding `max-diff-length` are automatically truncated. The AI reviews what fits. Keep PRs small for best results.
+With `split-review: true` (default), large PRs are reviewed file-by-file and findings are merged. This produces better results than truncating.
 
 **The review didn't appear — what happened?**
-Check the Actions tab in your repo for error logs. Common issues:
+Check the Actions tab for error logs. Common issues:
 - Invalid API key
 - Insufficient pollen balance
-- Missing `permissions` in workflow file
-- Very large diffs timing out
+- Missing `permissions` block in workflow
+- API timeout on very large diffs
 
 **Can I use this in a private repo?**
-Yes. GitHub Actions has a free tier for private repos. Just be aware the diff is sent to Pollinations.
+Yes. Be aware the diff is sent to Pollinations AI.
 
 ---
 
@@ -263,7 +288,7 @@ Yes. GitHub Actions has a free tier for private repos. Just be aware the diff is
 
 ```bash
 git clone https://github.com/mikl-shortcuts/Pollinations-PR-Reviewer.git
-cd pollinations-pr-reviewer
+cd Pollinations-PR-Reviewer
 npm install
 npm run build
 ```

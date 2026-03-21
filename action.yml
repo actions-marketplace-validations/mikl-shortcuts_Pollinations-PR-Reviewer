@@ -15,31 +15,53 @@ inputs:
     required: true
     default: "${{ github.token }}"
   model:
-    description: "AI model (openai, mistral, llama, etc.)"
+    description: "AI model to use for the review"
     required: false
     default: "openai"
   max-diff-length:
-    description: "Max diff characters"
+    description: "Max diff characters before truncation"
     required: false
     default: "30000"
   exclude-files:
-    description: "Comma-separated patterns to exclude"
+    description: "Comma-separated glob patterns to exclude from review"
     required: false
-    default: "*.lock,*.min.js,*.min.css,package-lock.json,yarn.lock,pnpm-lock.yaml,*.map,*.svg,*.png,*.jpg,*.gif,*.ico"
+    default: "*.lock,*.min.js,*.min.css,package-lock.json,yarn.lock,pnpm-lock.yaml,*.map,*.svg,*.png,*.jpg,*.gif,*.ico,*.woff,*.woff2,*.ttf,*.eot"
   custom-prompt:
-    description: "Additional instructions for reviewer"
+    description: "Additional context or instructions for the AI reviewer"
     required: false
     default: ""
+  post-as-review:
+    description: "Post as a formal PR review instead of a comment"
+    required: false
+    default: "false"
   post-as-check:
-    description: "Post review as a GitHub check run"
+    description: "Create a GitHub check run with annotations"
     required: false
     default: "true"
+  temperature:
+    description: "AI temperature (0.0-2.0)"
+    required: false
+    default: "0.3"
+  max-retries:
+    description: "Max retry attempts for API calls"
+    required: false
+    default: "3"
+  split-review:
+    description: "Review large PRs file-by-file and merge results"
+    required: false
+    default: "true"
+  split-threshold:
+    description: "Number of files above which split review activates"
+    required: false
+    default: "8"
 
 outputs:
   review:
-    description: "Generated review text"
+    description: "The full generated review text"
   verdict:
-    description: "Review verdict (APPROVE, REQUEST_CHANGES, or NEUTRAL)"
+    description: "Review verdict: APPROVE, REQUEST_CHANGES, or COMMENT"
+  files-reviewed:
+    description: "Number of files reviewed"
 
 runs:
   using: "node20"

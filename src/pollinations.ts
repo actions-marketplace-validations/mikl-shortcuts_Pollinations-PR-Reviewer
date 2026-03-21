@@ -9,27 +9,10 @@ export interface PollinationsOptions {
   temperature: number;
 }
 
-interface ChatCompletionResponse {
-  id: string;
-  choices: Array<{
-    message: {
-      content: string | null;
-      role: string;
-    };
-    finish_reason: string | null;
-    index: number;
-  }>;
-  model: string;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
-}
-
 export async function chat(
   messages: ChatMessage[],
-  options: PollinationsOptions
+  options: PollinationsOptions,
+  signal?: AbortSignal
 ): Promise<string> {
   const response = await fetch(
     "https://gen.pollinations.ai/v1/chat/completions",
@@ -44,44 +27,51 @@ export async function chat(
         messages,
         temperature: options.temperature,
       }),
+      signal,
     }
   );
 
   if (response.status === 401) {
-    throw new Error(
+    throw new PermanentError(
       "Invalid Pollinations API key. Get one at https://enter.pollinations.ai"
     );
   }
 
   if (response.status === 402) {
-    throw new Error(
+    throw new PermanentError(
       "Insufficient pollen balance. Top up at https://enter.pollinations.ai"
     );
   }
 
   if (response.status === 403) {
-    throw new Error(
-      "API key does not have permission for this model. Check your key settings."
+    throw new PermanentError(
+      "API key lacks permission for this model. Check your key settings."
     );
   }
 
+  if (response.status === 429) {
+    throw new TransientError("Rate limited by Pollinations API");
+  }
+
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Pollinations API error ${response.status}: ${text}`);
+    const text = await response.text().catch(() => "unknown");
+    throw new TransientError(
+      `Pollinations API error ${response.status}: ${text}`
+    );
   }
 
   const data = (await response.json()) as any;
 
-  if (!data.choices || data.choices.length === 0) {
-    throw new Error("Pollinations API returned no choices");
+  if (!data.choices?.length) {
+    throw new TransientError("Pollinations API returned no choices");
   }
 
-  const content = data.choices[0].message.content;
-  if (!content || content.toString().trim().length === 0) {
-    throw new Error("Pollinations API returned empty content");
+  const content = data.choices[0]?.message?.content;
+  if (!content || String(content).trim().length === 0) {
+    throw new TransientError("Pollinations API returned empty content");
   }
 
-  return content.toString().trim();
+  return String(content).trim();
 }
 
 export async function chatWithRetry(
@@ -93,25 +83,41 @@ export async function chatWithRetry(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await chat(messages, options);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+
+      try {
+        return await chat(messages, options, controller.signal);
+      } finally {
+        clearTimeout(timeout);
+      }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      const message = lastError.message.toLowerCase();
-      if (
-        message.includes("invalid") ||
-        message.includes("insufficient") ||
-        message.includes("permission")
-      ) {
-        throw lastError;
+      if (error instanceof PermanentError) {
+        throw error;
       }
 
       if (attempt < maxRetries) {
-        const delay = attempt * 5000;
+        const delay = Math.min(attempt * 5000, 30_000);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
 
   throw lastError;
+}
+
+export class PermanentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PermanentError";
+  }
+}
+
+export class TransientError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TransientError";
+  }
 }
