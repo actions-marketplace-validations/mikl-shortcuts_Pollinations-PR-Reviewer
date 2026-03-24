@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-major-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update tag and README
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = context.payload.release.tag_name;
+            const major = tag.split('.')[0];
+            const ref = `tags/${major}`;
+            const sha = '${{ github.sha }}';
+
+            try {
+              await github.rest.git.updateRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: ref,
+                sha: sha,
+                force: true
+              });
+            } catch (e) {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/${ref}`,
+                sha: sha
+              });
+            }
+
+            const readme = fs.readFileSync('README.md', 'utf8');
+            const updated = readme.replace(
+              /mikl-shortcuts\/Pollinations-PR-Reviewer@v\d+/g,
+              `mikl-shortcuts/Pollinations-PR-Reviewer@${major}`
+            );
+
+            if (updated !== readme) {
+              fs.writeFileSync('README.md', updated);
+            }
+
+      - name: Commit README
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "docs: update version to ${{ github.event.release.tag_name }}"
+          git push
