@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+        uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -97,7 +97,7 @@ Review is posted as a comment + check run on your PR
 ## Configuration
 
 ```yaml
-- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -157,7 +157,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -166,7 +166,7 @@ jobs:
 ### With Custom Instructions
 
 ```yaml
-- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -186,7 +186,7 @@ jobs:
 ### Only Review Source Code
 
 ```yaml
-- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -210,7 +210,7 @@ jobs:
     if: contains(github.event.comment.body, '/review')
     runs-on: ubuntu-latest
     steps:
-      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
         with:
           pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -219,7 +219,7 @@ jobs:
 ### Post as Formal PR Review
 
 ```yaml
-- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
   with:
     pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -231,7 +231,7 @@ jobs:
 ```yaml
 steps:
   - id: ai-review
-    uses: mikl-shortcuts/Pollinations-PR-Reviewer@v3
+    uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
     with:
       pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
       github-token: ${{ secrets.GITHUB_TOKEN }}
