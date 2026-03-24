@@ -14,6 +14,10 @@ jobs:
         with:
           ref: main
 
+      - name: Get commit SHA
+        id: sha
+        run: echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
       - name: Update tag and README
         uses: actions/github-script@v7
         with:
@@ -22,7 +26,7 @@ jobs:
             const tag = context.payload.release.tag_name;
             const major = tag.split('.')[0];
             const ref = `tags/${major}`;
-            const sha = context.payload.release.target_commitish;
+            const sha = '${{ steps.sha.outputs.commit }}';
 
             try {
               await github.rest.git.updateRef({
