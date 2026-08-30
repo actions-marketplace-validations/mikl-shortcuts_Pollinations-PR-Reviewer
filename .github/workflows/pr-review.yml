@@ -1,0 +1,20 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
+        with:
+          pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: "mikl-shortcuts/command-a-plus"

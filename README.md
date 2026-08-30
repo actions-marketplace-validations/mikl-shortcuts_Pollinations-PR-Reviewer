@@ -8,7 +8,7 @@ No servers to deploy. No infrastructure. Just a workflow file and an API key.
 
 ### 1. Get a Pollinations API key
 
-Go to [enter.pollinations.ai](https://enter.pollinations.ai) and create an API key.
+Go to [Pollinations Dashboard](https://enter.pollinations.ai) or [Pollinations CLI](https://github.com/pollinations/pollinations/tree/main/packages/polli-cli) and create an API key.
 
 ### 2. Add the key to your repo secrets
 
@@ -79,7 +79,8 @@ Review is posted as a comment + check run on your PR
 - **Formal PR reviews** with approve/request changes
 - **Smart file filtering** to skip generated files
 - **Retry with backoff** for transient API errors
-- **Request timeout** protection (120s per API call)
+- **Request timeout** protection with configurable limits
+- **Reasoning support** for models utilizing reasoning effort
 - **Verdict extraction** (APPROVE / REQUEST_CHANGES / COMMENT)
 
 ---
@@ -111,6 +112,8 @@ Review is posted as a comment + check run on your PR
     max-retries: "3"
     split-review: "true"
     split-threshold: "8"
+    reasoning-effort: "medium"
+    timeout: "120"
 ```
 
 ### Inputs
@@ -129,6 +132,8 @@ Review is posted as a comment + check run on your PR
 | `max-retries` | Max retry attempts for API calls | ❌ | `3` |
 | `split-review` | Review large PRs file-by-file | ❌ | `true` |
 | `split-threshold` | File count threshold for split mode | ❌ | `8` |
+| `reasoning-effort` | Reasoning effort level for reasoning models (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) | ❌ | — |
+| `timeout` | Request timeout limit per API call in seconds | ❌ | `120` |
 
 ### Outputs
 
@@ -226,6 +231,18 @@ jobs:
     post-as-review: "true"
 ```
 
+### Reasoning Models Configuration
+
+```yaml
+- uses: mikl-shortcuts/Pollinations-PR-Reviewer@v1
+  with:
+    pollinations-api-key: ${{ secrets.POLLINATIONS_API_KEY }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    model: "deepseek-pro"
+    reasoning-effort: "high"
+    timeout: "180"
+```
+
 ### Gate Merging on AI Review
 
 ```yaml
@@ -246,10 +263,10 @@ steps:
 
 ## API Key Types
 
-| Type | Prefix | Use Case | Rate Limit |
-|------|--------|----------|------------|
-| Secret | `sk_` | Server-side (recommended) | None |
-| Publishable | `pk_` | Client-side apps | 1 pollen/IP/hour |
+| Type | Where to Get It? | Prefix | Use Case | Rate Limit |
+|------|------------|--------|----------|------------|
+| Secret | [Pollinations Dashboard](https://enter.pollinations.ai/#keys) | `sk_` | Server-side (recommended) | None |
+| Publishable | [Pollinations CLI](https://github.com/pollinations/pollinations/tree/main/packages/polli-cli#account) or [Pollinations API](https://gen.pollinations.ai/docs#tag/account/POST/account/keys) | `pk_` | Client-side apps | 1 pollen/IP/hour |
 
 Use a `sk_` key stored as a GitHub secret. Never commit API keys.
 
@@ -257,17 +274,17 @@ Use a `sk_` key stored as a GitHub secret. Never commit API keys.
 
 ## FAQ
 
-**Where do I get an API key?**
-[enter.pollinations.ai](https://enter.pollinations.ai) — sign in and create a key.
+**Where do I get my first Pollinations API key?**
+[Pollinations Dashboard](https://enter.pollinations.ai) — sign in and create a key.
 
 **How much does it cost?**
-Each review consumes Pollen. Cost depends on model and diff size. Check balance at `gen.pollinations.ai/account/balance`.
+Each review consumes Pollen. Cost depends on model and diff size. Check models pricing at [Pollinations Models List](https://enter.pollinations.ai/#models) and your balance at [Pollinations Wallet](https://enter.pollinations.ai/#pollen).
 
 **What models can I use?**
-Any model at [gen.pollinations.ai/v1/models](https://gen.pollinations.ai/v1/models).
+Any model that avaiable at [Pollinations Models List](https://enter.pollinations.ai/#models).
 
 **Is my code sent to a third party?**
-The PR diff is sent to Pollinations AI for analysis. Don't use this on repos with confidential code.
+Yes, the PR diff is sent to Pollinations AI for analysis. You can check [Pollinations Privacy Policy](https://pollinations.ai/privacy) for more information.
 
 **What about large PRs?**
 With `split-review: true` (default), large PRs are reviewed file-by-file and findings are merged. This produces better results than truncating.
@@ -277,7 +294,7 @@ Check the Actions tab for error logs. Common issues:
 - Invalid API key
 - Insufficient pollen balance
 - Missing `permissions` block in workflow
-- API timeout on very large diffs
+- API timeout on very large diffs (can be resolved by increasing the `timeout` setting)
 
 **Can I use this in a private repo?**
-Yes. Be aware the diff is sent to Pollinations AI.
+Yes. You can check [Pollinations Privacy Policy](https://pollinations.ai/privacy) for more information.

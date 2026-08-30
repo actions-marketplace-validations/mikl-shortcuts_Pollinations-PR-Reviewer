@@ -54,6 +54,14 @@ inputs:
     description: "Number of files above which split review activates"
     required: false
     default: "8"
+  reasoning-effort:
+    description: "Reasoning effort for reasoning models (e.g. none, low, medium, high)"
+    required: false
+    default: ""
+  timeout:
+    description: "Timeout for each Pollinations API call in seconds"
+    required: false
+    default: "120"
 
 outputs:
   review:
